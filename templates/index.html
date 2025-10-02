@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pengenalan Wajah</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background: #fff;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            max-width: 400px;
+            width: 100%;
+        }
+        h1 {
+            color: #5a67d8;
+            margin-bottom: 1.5rem;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        input[type="file"] {
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+        button {
+            padding: 0.75rem 1.5rem;
+            background-color: #5a67d8;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #434190;
+        }
+        #result-container {
+            margin-top: 1.5rem;
+        }
+        #result-name {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #333;
+            padding: 1rem;
+            border-radius: 4px;
+            min-height: 50px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .result-found {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .result-unknown {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .result-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            font-size: 1rem;
+            font-weight: normal;
+        }
+        .nav-link {
+            margin-top: 1.5rem;
+            display: block;
+            color: #5a67d8;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Pengenalan Wajah</h1>
+        <form id="recognize-form">
+            <label for="file">Pilih Gambar untuk Dikenali:</label>
+            <input type="file" id="file" name="file" accept="image/jpeg, image/png" required>
+            <button type="submit">Kenali</button>
+        </form>
+        <div id="result-container">
+            <h3>Hasil:</h3>
+            <div id="result-name">Menunggu gambar...</div>
+        </div>
+        <a href="/train" class="nav-link">Latih Wajah Baru</a>
+    </div>
+
+    <script>
+        document.getElementById('recognize-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+
+            const form = event.target;
+            const formData = new FormData(form);
+            const resultDiv = document.getElementById('result-name');
+            const submitButton = form.querySelector('button');
+
+            submitButton.disabled = true;
+            submitButton.textContent = 'Mengenali...';
+
+            resultDiv.textContent = 'Memproses...';
+            resultDiv.className = '';
+
+            try {
+                const response = await fetch('/api/recognize', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    if (result.name === 'Unknown') {
+                        resultDiv.textContent = 'Wajah Tidak Dikenali';
+                        resultDiv.classList.add('result-unknown');
+                    } else {
+                        resultDiv.textContent = `Dikenali sebagai: ${result.name}`;
+                        resultDiv.classList.add('result-found');
+                    }
+                } else {
+                    resultDiv.textContent = result.error || 'Terjadi kesalahan saat pengenalan.';
+                    resultDiv.classList.add('result-error');
+                }
+            } catch (error) {
+                resultDiv.textContent = 'Gagal terhubung ke server.';
+                resultDiv.classList.add('result-error');
+            } finally {
+                submitButton.disabled = false;
+                submitButton.textContent = 'Kenali';
+            }
+        });
+    </script>
+</body>
+</html>
