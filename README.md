@@ -74,6 +74,18 @@ Setelah model dilatih, Anda dapat menggunakannya untuk mengenali wajah.
 
 3.  **Lihat Hasil**: Aplikasi akan menampilkan nama orang yang dikenali di bawah bagian "Hasil". Jika wajah tidak dikenali atau tidak terdeteksi, pesan yang sesuai akan ditampilkan.
 
+### 3. Pengenalan Real-time (via Webcam)
+
+Setelah model Anda dilatih, Anda dapat menjalankan skrip pemindaian real-time untuk mengenali wajah langsung dari webcam Anda.
+
+1.  Pastikan Anda telah melatih model Anda menggunakan antarmuka web.
+2.  Jalankan skrip berikut dari terminal di direktori utama proyek:
+    ```bash
+    python scan_realtime.py
+    ```
+3.  Sebuah jendela video akan muncul, menampilkan feed dari webcam Anda. Jika wajah yang telah dilatih terdeteksi, nama orang tersebut akan muncul di bawah kotak yang mengelilingi wajah.
+4.  Tekan tombol **'q'** pada keyboard Anda untuk menutup jendela dan menghentikan skrip.
+
 ## API Endpoints
 
 Aplikasi ini juga menyediakan beberapa endpoint API:
