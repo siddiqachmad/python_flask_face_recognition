@@ -33,6 +33,10 @@ def run_realtime_scanner():
             target_names = pickle.load(f)
 
         detector = cv2.CascadeClassifier(CASCADE_FILE)
+        if detector.empty():
+            print(f"Kesalahan: Gagal memuat file cascade classifier dari {CASCADE_FILE}")
+            return
+
         print("Model berhasil dimuat.")
     except Exception as e:
         print(f"Gagal memuat model: {e}")
@@ -57,13 +61,8 @@ def run_realtime_scanner():
         # Konversi frame ke grayscale untuk deteksi wajah
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # Deteksi wajah dalam frame
-        faces = detector.detectMultiScale(
-            gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(30, 30)
-        )
+        # Deteksi wajah dalam frame (menggunakan parameter default agar konsisten dengan app.py)
+        faces = detector.detectMultiScale(gray)
 
         # Loop melalui setiap wajah yang terdeteksi
         for (x, y, w, h) in faces:
@@ -90,7 +89,7 @@ def run_realtime_scanner():
             cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
 
             # Tulis nama yang dikenali di bawah kotak
-            cv2.putText(frame, recognized_name, (x, y+h+20), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 1)
+            cv2.putText(frame, recognized_name, (x, y+h+20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
         # Tampilkan frame yang hasilnya
         cv2.imshow('Video Pengenalan Wajah', frame)

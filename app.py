@@ -35,9 +35,6 @@ PCA_MODEL_FILE = os.path.join(MODELS_FOLDER, 'pca.pkl')
 SVM_MODEL_FILE = os.path.join(MODELS_FOLDER, 'svm.pkl')
 TARGET_NAMES_FILE = os.path.join(MODELS_FOLDER, 'target_names.pkl')
 
-# Inisialisasi detektor wajah
-detector = cv2.CascadeClassifier(CASCADE_FILE)
-
 # --- Rute Halaman ---
 @app.route('/')
 def index():
@@ -48,6 +45,32 @@ def train_page():
     return render_template('train.html')
 
 # --- Rute API ---
+@app.route('/api/training-status', methods=['GET'])
+def training_status():
+    """Memeriksa apakah dataset siap untuk training."""
+    try:
+        # Hitung jumlah subdirektori (setiap subdirektori adalah satu orang)
+        subdirs = [d for d in os.scandir(DATASET_FOLDER) if d.is_dir()]
+        num_classes = len(subdirs)
+
+        ready_to_train = num_classes >= 2
+
+        if ready_to_train:
+            message = f"Dataset siap. Ditemukan data untuk {num_classes} orang."
+        elif num_classes == 1:
+            message = f"Dataset belum siap. Diperlukan data dari setidaknya 2 orang. Baru ada {num_classes}."
+        else: # num_classes == 0
+            message = "Dataset kosong. Tambahkan gambar untuk setidaknya 2 orang."
+
+        return jsonify({
+            'ready_to_train': ready_to_train,
+            'num_classes': num_classes,
+            'message': message
+        })
+    except Exception as e:
+        return jsonify({'error': f'Gagal memeriksa status training: {str(e)}'}), 500
+
+
 @app.route('/api/add-face', methods=['POST'])
 def add_face():
     """Menyimpan gambar wajah baru ke dataset untuk training."""
@@ -73,6 +96,11 @@ def add_face():
 @app.route('/api/train-model', methods=['POST'])
 def train_model():
     """Melatih model dari semua gambar di dataset."""
+    detector = cv2.CascadeClassifier(CASCADE_FILE)
+    if detector.empty():
+        print(f"ERROR: Gagal memuat file cascade classifier dari {CASCADE_FILE}")
+        return jsonify({'error': 'Kesalahan Internal: Tidak dapat memuat file cascade classifier.'}), 500
+
     t0 = time()
     print("Mulai proses training model...")
 
@@ -104,12 +132,20 @@ def train_model():
                 print(f"Gagal memproses {filepath}: {e}")
         label_count += 1
 
+    # Periksa apakah direktori dataset benar-benar kosong
+    if not any(os.scandir(DATASET_FOLDER)):
+        return jsonify({'error': 'Dataset kosong. Silakan tambahkan gambar melalui "Langkah 1" terlebih dahulu.'}), 400
+
     if not X:
-        return jsonify({'error': 'Dataset kosong atau tidak ada wajah yang terdeteksi. Tambahkan beberapa wajah terlebih dahulu.'}), 400
+        return jsonify({'error': 'Tidak ada wajah yang terdeteksi pada gambar di dalam dataset. Pastikan gambar jelas dan wajah terlihat.'}), 400
 
     n_samples = len(X)
     n_classes = len(target_names)
     print(f"Total sampel: {n_samples}, Total kelas: {n_classes}")
+
+    # Periksa apakah ada cukup kelas untuk dilatih; SVM memerlukan setidaknya 2.
+    if n_classes < 2:
+        return jsonify({'error': 'Training memerlukan data dari setidaknya dua orang yang berbeda untuk dapat membandingkan.'}), 400
 
     # 1. Latih PCA
     print("Melatih PCA...")
@@ -141,6 +177,11 @@ def train_model():
 @app.route('/api/recognize', methods=['POST'])
 def recognize():
     """Mengenali wajah dari gambar menggunakan model yang telah dilatih."""
+    detector = cv2.CascadeClassifier(CASCADE_FILE)
+    if detector.empty():
+        print(f"ERROR: Gagal memuat file cascade classifier dari {CASCADE_FILE}")
+        return jsonify({'error': 'Kesalahan Internal: Tidak dapat memuat file cascade classifier.'}), 500
+
     if 'file' not in request.files:
         return jsonify({'error': 'File tidak ada'}), 400
 

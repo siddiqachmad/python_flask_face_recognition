@@ -112,8 +112,8 @@
         <!-- Bagian 2: Latih Model -->
         <div id="train-model-section">
             <h2>Langkah 2: Latih Model</h2>
-            <p>Klik tombol ini setelah Anda menambahkan semua gambar yang diperlukan.</p>
-            <button id="train-model-button" class="btn-secondary">Latih Model Sekarang</button>
+            <p>Memeriksa status dataset...</p>
+            <button id="train-model-button" class="btn-secondary" disabled>Latih Model Sekarang</button>
         </div>
 
         <!-- Area Pesan -->
@@ -124,6 +124,22 @@
 
     <script>
         const messageDiv = document.getElementById('message');
+        const trainButton = document.getElementById('train-model-button');
+        const trainStatusText = document.querySelector('#train-model-section p');
+
+        // Fungsi untuk memeriksa status training dari backend
+        async function checkTrainingStatus() {
+            try {
+                const response = await fetch('/api/training-status');
+                const status = await response.json();
+
+                trainStatusText.textContent = status.message;
+                trainButton.disabled = !status.ready_to_train;
+            } catch (error) {
+                trainStatusText.textContent = "Gagal memeriksa status training.";
+                trainButton.disabled = true;
+            }
+        }
 
         // Handler untuk form "Tambah Wajah"
         document.getElementById('add-face-form').addEventListener('submit', async function(event) {
@@ -144,6 +160,8 @@
                 if (response.ok) {
                     showMessage(result.success, 'success');
                     form.reset();
+                    // Periksa kembali status setelah berhasil menambahkan wajah
+                    await checkTrainingStatus();
                 } else {
                     showMessage(result.error, 'error');
                 }
@@ -155,9 +173,8 @@
         });
 
         // Handler untuk tombol "Latih Model"
-        document.getElementById('train-model-button').addEventListener('click', async function() {
-            const trainButton = this;
-            setLoading(trainButton, 'Melatih...', true);
+        trainButton.addEventListener('click', async function() {
+            setLoading(this, 'Melatih...', true);
             showMessage('', 'none');
 
             try {
@@ -173,9 +190,14 @@
             } catch (error) {
                 showMessage('Gagal terhubung ke server.', 'error');
             } finally {
-                setLoading(trainButton, 'Latih Model Sekarang', false);
+                setLoading(this, 'Latih Model Sekarang', false);
+                // Periksa status lagi setelah training (opsional, tapi bagus untuk konsistensi)
+                await checkTrainingStatus();
             }
         });
+
+        // Panggil checkTrainingStatus saat halaman pertama kali dimuat
+        document.addEventListener('DOMContentLoaded', checkTrainingStatus);
 
         function setLoading(button, text, disabled) {
             button.textContent = text;
@@ -184,6 +206,7 @@
 
         function showMessage(text, type) {
             messageDiv.textContent = text;
+            messageDiv.style.display = 'block';
             if (type === 'success') {
                 messageDiv.className = 'message-success';
             } else if (type === 'error') {
