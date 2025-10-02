@@ -5,7 +5,7 @@ import os
 
 # --- Konfigurasi ---
 MODELS_FOLDER = 'models'
-CASCADE_FILE = 'haarcascade_frontalface_default.xml'
+CASCADE_FILE = os.path.join(MODELS_FOLDER, 'haarcascade_frontalface_default.xml')
 IMG_WIDTH, IMG_HEIGHT = 100, 100 # Harus sama dengan yang di app.py
 
 # Path ke file model

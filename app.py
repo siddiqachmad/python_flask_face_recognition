@@ -15,7 +15,7 @@ app = Flask(__name__)
 UPLOAD_FOLDER = 'static/uploads'
 DATASET_FOLDER = 'dataset'
 MODELS_FOLDER = 'models'
-CASCADE_FILE = 'haarcascade_frontalface_default.xml'
+CASCADE_FILE = os.path.join(MODELS_FOLDER, 'haarcascade_frontalface_default.xml')
 
 # Dimensi untuk resize gambar wajah
 IMG_WIDTH, IMG_HEIGHT = 100, 100
