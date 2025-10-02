@@ -3,11 +3,7 @@ import pickle
 import cv2
 import numpy as np
 from flask import Flask, request, jsonify, render_template
-from sklearn.model_selection import train_test_split
-from sklearn.decomposition import PCA
-from sklearn.svm import SVC
 from PIL import Image
-from time import time
 
 app = Flask(__name__)
 
@@ -17,23 +13,14 @@ DATASET_FOLDER = 'dataset'
 MODELS_FOLDER = 'models'
 CASCADE_FILE = os.path.join(MODELS_FOLDER, 'haarcascade_frontalface_default.xml')
 
-# Dimensi untuk resize gambar wajah
-IMG_WIDTH, IMG_HEIGHT = 100, 100
-
-# Komponen PCA
-N_COMPONENTS = 15
+# File untuk model LBPH dan label
+LBPH_MODEL_FILE = os.path.join(MODELS_FOLDER, 'lbph_model.yml')
+LABELS_FILE = os.path.join(MODELS_FOLDER, 'labels.pkl')
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
-# Pastikan direktori ada
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(DATASET_FOLDER, exist_ok=True)
 os.makedirs(MODELS_FOLDER, exist_ok=True)
-
-# Path untuk file model yang akan disimpan
-PCA_MODEL_FILE = os.path.join(MODELS_FOLDER, 'pca.pkl')
-SVM_MODEL_FILE = os.path.join(MODELS_FOLDER, 'svm.pkl')
-TARGET_NAMES_FILE = os.path.join(MODELS_FOLDER, 'target_names.pkl')
 
 # --- Rute Halaman ---
 @app.route('/')
@@ -49,17 +36,15 @@ def train_page():
 def training_status():
     """Memeriksa apakah dataset siap untuk training."""
     try:
-        # Hitung jumlah subdirektori (setiap subdirektori adalah satu orang)
         subdirs = [d for d in os.scandir(DATASET_FOLDER) if d.is_dir()]
         num_classes = len(subdirs)
-
         ready_to_train = num_classes >= 2
 
         if ready_to_train:
             message = f"Dataset siap. Ditemukan data untuk {num_classes} orang."
         elif num_classes == 1:
             message = f"Dataset belum siap. Diperlukan data dari setidaknya 2 orang. Baru ada {num_classes}."
-        else: # num_classes == 0
+        else:
             message = "Dataset kosong. Tambahkan gambar untuk setidaknya 2 orang."
 
         return jsonify({
@@ -69,7 +54,6 @@ def training_status():
         })
     except Exception as e:
         return jsonify({'error': f'Gagal memeriksa status training: {str(e)}'}), 500
-
 
 @app.route('/api/add-face', methods=['POST'])
 def add_face():
@@ -86,140 +70,110 @@ def add_face():
     person_folder = os.path.join(DATASET_FOLDER, name)
     os.makedirs(person_folder, exist_ok=True)
 
-    # Simpan file ke folder orang tersebut
     filepath = os.path.join(person_folder, file.filename)
     file.save(filepath)
 
     return jsonify({'success': f'Gambar untuk "{name}" berhasil ditambahkan.'})
 
-
 @app.route('/api/train-model', methods=['POST'])
 def train_model():
-    """Melatih model dari semua gambar di dataset."""
+    """Melatih model LBPH dari semua gambar di dataset."""
     detector = cv2.CascadeClassifier(CASCADE_FILE)
     if detector.empty():
-        print(f"ERROR: Gagal memuat file cascade classifier dari {CASCADE_FILE}")
         return jsonify({'error': 'Kesalahan Internal: Tidak dapat memuat file cascade classifier.'}), 500
 
-    t0 = time()
-    print("Mulai proses training model...")
+    faces, ids = [], []
+    label_map = {}
+    current_id = 0
 
-    X, y, target_names = [], [], []
-    label_count = 0
-
-    # Membaca semua gambar dari dataset
-    for person_name in os.listdir(DATASET_FOLDER):
+    for person_name in sorted(os.listdir(DATASET_FOLDER)):
         person_folder = os.path.join(DATASET_FOLDER, person_name)
         if not os.path.isdir(person_folder):
             continue
 
-        target_names.append(person_name)
+        if person_name not in label_map:
+            label_map[person_name] = current_id
+            current_id += 1
+
+        person_id = label_map[person_name]
+
         for filename in os.listdir(person_folder):
             filepath = os.path.join(person_folder, filename)
             try:
-                # Buka gambar, konversi ke grayscale
-                pil_image = Image.open(filepath).convert('L')
+                pil_image = Image.open(filepath).convert('L') # Konversi ke grayscale
                 image_np = np.array(pil_image, 'uint8')
 
-                # Deteksi wajah
-                faces = detector.detectMultiScale(image_np)
-                for (x, y_face, w, h) in faces:
-                    # Crop dan resize wajah, lalu flatten
-                    face_resized = cv2.resize(image_np[y_face:y_face+h, x:x+w], (IMG_WIDTH, IMG_HEIGHT))
-                    X.append(face_resized.flatten())
-                    y.append(label_count)
+                detected_faces = detector.detectMultiScale(image_np)
+                for (x, y, w, h) in detected_faces:
+                    faces.append(image_np[y:y+h, x:x+w])
+                    ids.append(person_id)
             except Exception as e:
                 print(f"Gagal memproses {filepath}: {e}")
-        label_count += 1
 
-    # Periksa apakah direktori dataset benar-benar kosong
-    if not any(os.scandir(DATASET_FOLDER)):
-        return jsonify({'error': 'Dataset kosong. Silakan tambahkan gambar melalui "Langkah 1" terlebih dahulu.'}), 400
+    if not faces:
+        return jsonify({'error': 'Tidak ada wajah yang terdeteksi di dalam dataset.'}), 400
 
-    if not X:
-        return jsonify({'error': 'Tidak ada wajah yang terdeteksi pada gambar di dalam dataset. Pastikan gambar jelas dan wajah terlihat.'}), 400
+    if len(label_map) < 2:
+        return jsonify({'error': 'Training memerlukan data dari setidaknya dua orang yang berbeda.'}), 400
 
-    n_samples = len(X)
-    n_classes = len(target_names)
-    print(f"Total sampel: {n_samples}, Total kelas: {n_classes}")
+    # Latih model LBPH
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
+    recognizer.train(faces, np.array(ids))
 
-    # Periksa apakah ada cukup kelas untuk dilatih; SVM memerlukan setidaknya 2.
-    if n_classes < 2:
-        return jsonify({'error': 'Training memerlukan data dari setidaknya dua orang yang berbeda untuk dapat membandingkan.'}), 400
+    # Simpan model dan mapping label
+    recognizer.write(LBPH_MODEL_FILE)
+    with open(LABELS_FILE, 'wb') as f:
+        # Kita perlu membalik map untuk lookup nanti (id -> nama)
+        id_to_name_map = {v: k for k, v in label_map.items()}
+        pickle.dump(id_to_name_map, f)
 
-    # 1. Latih PCA
-    print("Melatih PCA...")
-    # Sesuaikan n_components jika jumlah sampel lebih sedikit
-    actual_n_components = min(N_COMPONENTS, n_samples, len(X[0]))
-    pca = PCA(n_components=actual_n_components, whiten=True).fit(X)
-
-    # 2. Transformasi data menggunakan PCA
-    X_pca = pca.transform(X)
-
-    # 3. Latih SVM Classifier
-    print("Melatih SVM...")
-    # Mungkin perlu GridSearchCV di sini untuk hasil terbaik, tapi kita gunakan parameter default untuk kecepatan
-    clf = SVC(kernel='rbf', class_weight='balanced', probability=True)
-    clf.fit(X_pca, y)
-
-    # 4. Simpan model
-    with open(PCA_MODEL_FILE, 'wb') as f:
-        pickle.dump(pca, f)
-    with open(SVM_MODEL_FILE, 'wb') as f:
-        pickle.dump(clf, f)
-    with open(TARGET_NAMES_FILE, 'wb') as f:
-        pickle.dump(target_names, f)
-
-    print(f"Training selesai dalam {time() - t0:.3f}s")
-    return jsonify({'success': f'Model berhasil dilatih dengan {n_samples} sampel dari {n_classes} orang.'})
+    return jsonify({'success': f'Model berhasil dilatih dengan {len(faces)} wajah dari {len(label_map)} orang.'})
 
 
 @app.route('/api/recognize', methods=['POST'])
 def recognize():
-    """Mengenali wajah dari gambar menggunakan model yang telah dilatih."""
+    """Mengenali wajah dari gambar menggunakan model LBPH."""
+    if not all(os.path.exists(f) for f in [LBPH_MODEL_FILE, LABELS_FILE]):
+        return jsonify({'error': 'Model belum dilatih. Silakan latih model terlebih dahulu.'}), 400
+
     detector = cv2.CascadeClassifier(CASCADE_FILE)
     if detector.empty():
-        print(f"ERROR: Gagal memuat file cascade classifier dari {CASCADE_FILE}")
         return jsonify({'error': 'Kesalahan Internal: Tidak dapat memuat file cascade classifier.'}), 500
+
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
+    recognizer.read(LBPH_MODEL_FILE)
+    with open(LABELS_FILE, 'rb') as f:
+        id_to_name_map = pickle.load(f)
 
     if 'file' not in request.files:
         return jsonify({'error': 'File tidak ada'}), 400
 
-    # Periksa apakah model sudah ada
-    if not all(os.path.exists(f) for f in [PCA_MODEL_FILE, SVM_MODEL_FILE, TARGET_NAMES_FILE]):
-        return jsonify({'error': 'Model belum dilatih. Silakan latih model terlebih dahulu.'}), 400
-
-    # Muat model
-    with open(PCA_MODEL_FILE, 'rb') as f:
-        pca = pickle.load(f)
-    with open(SVM_MODEL_FILE, 'rb') as f:
-        clf = pickle.load(f)
-    with open(TARGET_NAMES_FILE, 'rb') as f:
-        target_names = pickle.load(f)
-
     file = request.files['file']
     filepath = os.path.join(UPLOAD_FOLDER, file.filename)
+
     try:
         file.save(filepath)
-
         pil_image = Image.open(filepath).convert('L')
         image_np = np.array(pil_image, 'uint8')
 
-        faces = detector.detectMultiScale(image_np)
-        if len(faces) == 0:
+        detected_faces = detector.detectMultiScale(image_np)
+        if len(detected_faces) == 0:
             return jsonify({'name': 'Unknown', 'message': 'Wajah tidak terdeteksi.'})
 
-        # Ambil wajah pertama yang terdeteksi
-        (x, y, w, h) = faces[0]
-        face_resized = cv2.resize(image_np[y:y+h, x:x+w], (IMG_WIDTH, IMG_HEIGHT))
+        (x, y, w, h) = detected_faces[0]
+        face = image_np[y:y+h, x:x+w]
 
-        # Transformasi dan prediksi
-        face_pca = pca.transform(face_resized.flatten().reshape(1, -1))
-        prediction = clf.predict(face_pca)
+        # Prediksi menggunakan model LBPH
+        label_id, confidence = recognizer.predict(face)
 
-        recognized_name = target_names[prediction[0]]
+        # Confidence 0 adalah kecocokan sempurna. Kita set threshold.
+        # Nilai di bawah 80-100 seringkali merupakan hasil yang baik.
+        if confidence < 100:
+            recognized_name = id_to_name_map.get(label_id, "Unknown")
+        else:
+            recognized_name = "Unknown"
 
-        return jsonify({'name': recognized_name})
+        return jsonify({'name': recognized_name, 'confidence': confidence})
 
     except Exception as e:
         return jsonify({'error': f'Terjadi kesalahan: {str(e)}'}), 500

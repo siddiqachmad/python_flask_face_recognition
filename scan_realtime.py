@@ -6,44 +6,41 @@ import os
 # --- Konfigurasi ---
 MODELS_FOLDER = 'models'
 CASCADE_FILE = os.path.join(MODELS_FOLDER, 'haarcascade_frontalface_default.xml')
-IMG_WIDTH, IMG_HEIGHT = 100, 100 # Harus sama dengan yang di app.py
+LBPH_MODEL_FILE = os.path.join(MODELS_FOLDER, 'lbph_model.yml')
+LABELS_FILE = os.path.join(MODELS_FOLDER, 'labels.pkl')
 
-# Path ke file model
-PCA_MODEL_FILE = os.path.join(MODELS_FOLDER, 'pca.pkl')
-SVM_MODEL_FILE = os.path.join(MODELS_FOLDER, 'svm.pkl')
-TARGET_NAMES_FILE = os.path.join(MODELS_FOLDER, 'target_names.pkl')
+# Threshold kepercayaan (confidence) untuk LBPH. Nilai yang lebih rendah berarti lebih percaya diri.
+# Nilai di bawah 100 umumnya dianggap sebagai kecocokan yang wajar.
+CONFIDENCE_THRESHOLD = 100
 
 def run_realtime_scanner():
     """
-    Fungsi utama untuk menjalankan pemindai wajah real-time.
+    Fungsi utama untuk menjalankan pemindai wajah real-time menggunakan model LBPH.
     """
     # 1. Periksa apakah semua model yang diperlukan ada
-    if not all(os.path.exists(f) for f in [PCA_MODEL_FILE, SVM_MODEL_FILE, TARGET_NAMES_FILE, CASCADE_FILE]):
+    if not all(os.path.exists(f) for f in [LBPH_MODEL_FILE, LABELS_FILE, CASCADE_FILE]):
         print("Kesalahan: Model atau file cascade tidak ditemukan.")
-        print("Pastikan Anda telah melatih model melalui antarmuka web ('/train') dan file haarcascade_frontalface_default.xml ada di direktori yang sama.")
+        print("Pastikan Anda telah melatih model melalui antarmuka web ('/train').")
         return
 
-    # 2. Muat model yang telah dilatih
+    # 2. Muat model LBPH dan label
     try:
-        with open(PCA_MODEL_FILE, 'rb') as f:
-            pca = pickle.load(f)
-        with open(SVM_MODEL_FILE, 'rb') as f:
-            clf = pickle.load(f)
-        with open(TARGET_NAMES_FILE, 'rb') as f:
-            target_names = pickle.load(f)
+        recognizer = cv2.face.LBPHFaceRecognizer_create()
+        recognizer.read(LBPH_MODEL_FILE)
+        with open(LABELS_FILE, 'rb') as f:
+            id_to_name_map = pickle.load(f)
 
         detector = cv2.CascadeClassifier(CASCADE_FILE)
         if detector.empty():
             print(f"Kesalahan: Gagal memuat file cascade classifier dari {CASCADE_FILE}")
             return
 
-        print("Model berhasil dimuat.")
+        print("Model LBPH berhasil dimuat.")
     except Exception as e:
         print(f"Gagal memuat model: {e}")
         return
 
     # 3. Inisialisasi webcam
-    # Angka 0 berarti webcam default. Ubah jika Anda memiliki beberapa kamera.
     video_capture = cv2.VideoCapture(0)
     if not video_capture.isOpened():
         print("Kesalahan: Tidak dapat membuka webcam.")
@@ -52,53 +49,36 @@ def run_realtime_scanner():
     print("Memulai pemindaian real-time... Tekan 'q' untuk keluar.")
 
     while True:
-        # Tangkap frame per frame dari webcam
         ret, frame = video_capture.read()
         if not ret:
-            print("Tidak dapat menerima frame. Keluar...")
             break
 
-        # Konversi frame ke grayscale untuk deteksi wajah
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = detector.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5)
 
-        # Deteksi wajah dalam frame (menggunakan parameter default agar konsisten dengan app.py)
-        faces = detector.detectMultiScale(gray)
-
-        # Loop melalui setiap wajah yang terdeteksi
         for (x, y, w, h) in faces:
-            # Crop wajah dari frame grayscale
-            face_gray = gray[y:y+h, x:x+w]
+            # Prediksi wajah yang terdeteksi
+            face_roi = gray[y:y+h, x:x+w]
+            label_id, confidence = recognizer.predict(face_roi)
 
-            # Resize wajah agar sesuai dengan ukuran input model
-            face_resized = cv2.resize(face_gray, (IMG_WIDTH, IMG_HEIGHT))
+            # Tentukan nama berdasarkan tingkat kepercayaan
+            if confidence < CONFIDENCE_THRESHOLD:
+                name = id_to_name_map.get(label_id, "Unknown")
+                display_text = f"{name} ({confidence:.2f})"
+            else:
+                name = "Unknown"
+                display_text = f"{name} ({confidence:.2f})"
 
-            # Ubah wajah menjadi vektor fitur dan lakukan transformasi PCA
-            face_vector = face_resized.flatten().reshape(1, -1)
-            face_pca = pca.transform(face_vector)
+            # Gambar kotak dan teks di sekitar wajah
+            color = (0, 255, 0) if name != "Unknown" else (0, 0, 255)
+            cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+            cv2.putText(frame, display_text, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
-            # Lakukan prediksi menggunakan model SVM
-            prediction = clf.predict(face_pca)
-            recognized_name = target_names[prediction[0]]
+        cv2.imshow('Video Pengenalan Wajah (LBPH)', frame)
 
-            # Ambil probabilitas prediksi
-            # proba = clf.predict_proba(face_pca)
-            # confidence = proba.max() * 100
-            # text_to_display = f"{recognized_name} ({confidence:.2f}%)"
-
-            # Gambar kotak di sekitar wajah yang terdeteksi pada frame asli
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-
-            # Tulis nama yang dikenali di bawah kotak
-            cv2.putText(frame, recognized_name, (x, y+h+20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-
-        # Tampilkan frame yang hasilnya
-        cv2.imshow('Video Pengenalan Wajah', frame)
-
-        # Hentikan loop jika tombol 'q' ditekan
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    # Setelah selesai, lepaskan webcam dan tutup semua jendela
     video_capture.release()
     cv2.destroyAllWindows()
     print("Pemindaian dihentikan.")
