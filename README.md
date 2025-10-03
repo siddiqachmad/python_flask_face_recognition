@@ -33,7 +33,7 @@ Aplikasi web sederhana yang dibangun menggunakan Python, Flask, OpenCV, dan Scik
     ```bash
     pip install -r requirements.txt
     ```
-    Ini akan menginstal Flask, Scikit-learn, OpenCV, dan Numpy.
+    Ini akan menginstal Flask, Scikit-learn, OpenCV, Numpy, dan MediaPipe.
 
 4.  **Jalankan Aplikasi**
     ```bash
@@ -74,17 +74,25 @@ Setelah model dilatih, Anda dapat menggunakannya untuk mengenali wajah.
 
 3.  **Lihat Hasil**: Aplikasi akan menampilkan nama orang yang dikenali di bawah bagian "Hasil". Jika wajah tidak dikenali atau tidak terdeteksi, pesan yang sesuai akan ditampilkan.
 
-### 3. Pengenalan Real-time (via Webcam)
+### 3. Pengenalan Real-time dengan Deteksi Kehidupan (Liveness Detection)
 
-Setelah model Anda dilatih, Anda dapat menjalankan skrip pemindaian real-time untuk mengenali wajah langsung dari webcam Anda.
+Setelah model Anda dilatih, Anda dapat menjalankan skrip pemindaian real-time yang kini dilengkapi dengan deteksi kehidupan untuk mencegah spoofing menggunakan foto.
+
+**Cara Kerja:**
+1.  **Deteksi Kedipan:** Aplikasi menggunakan Google MediaPipe untuk mendeteksi landmark wajah dan menghitung *Eye Aspect Ratio* (EAR). Anda harus berkedip terlebih dahulu untuk membuktikan bahwa Anda adalah orang sungguhan.
+2.  **Pengenalan Wajah:** Setelah kedipan yang valid terdeteksi, aplikasi akan menggunakan model LBPH yang telah Anda latih untuk mengenali wajah Anda.
+
+**Cara Menjalankan:**
 
 1.  Pastikan Anda telah melatih model Anda menggunakan antarmuka web.
 2.  Jalankan skrip berikut dari terminal di direktori utama proyek:
     ```bash
     python scan_realtime.py
     ```
-3.  Sebuah jendela video akan muncul, menampilkan feed dari webcam Anda. Jika wajah yang telah dilatih terdeteksi, nama orang tersebut akan muncul di bawah kotak yang mengelilingi wajah.
-4.  Tekan tombol **'q'** pada keyboard Anda untuk menutup jendela dan menghentikan skrip.
+3.  Sebuah jendela video akan muncul dengan status "Menunggu Kedipan...".
+4.  Posisikan wajah Anda di depan kamera dan **berkedip satu kali**.
+5.  Setelah kedipan terdeteksi, status akan berubah menjadi "Liveness Terdeteksi" dan hasil pengenalan akan ditampilkan selama beberapa detik.
+6.  Tekan tombol **'q'** pada keyboard Anda untuk menutup jendela dan menghentikan skrip.
 
 ## API Endpoints
 
