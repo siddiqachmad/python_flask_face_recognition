@@ -28,16 +28,18 @@
             color: #5a67d8;
             margin-bottom: 1.5rem;
         }
-        form {
+        video {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 100%;
+            height: auto;
+            background: #eee;
+        }
+        .webcam-controls {
             display: flex;
             flex-direction: column;
             gap: 1rem;
-        }
-        input[type="file"] {
-            padding: 0.75rem;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 1rem;
+            margin: 1rem 0;
         }
         button {
             padding: 0.75rem 1.5rem;
@@ -91,11 +93,14 @@
 <body>
     <div class="container">
         <h1>Pengenalan Wajah</h1>
-        <form id="recognize-form">
-            <label for="file">Pilih Gambar untuk Dikenali:</label>
-            <input type="file" id="file" name="file" accept="image/jpeg, image/png" required>
-            <button type="submit">Kenali</button>
-        </form>
+        <div id="webcam-container">
+            <video id="webcam" autoplay playsinline></video>
+            <canvas id="canvas" style="display:none;"></canvas>
+        </div>
+        <div class="webcam-controls">
+            <button id="start-webcam" class="btn-secondary">Mulai Webcam</button>
+            <button id="recognize-button" disabled>Kenali Wajah</button>
+        </div>
         <div id="result-container">
             <h3>Hasil:</h3>
             <div id="result-name">Menunggu gambar...</div>
@@ -104,19 +109,57 @@
     </div>
 
     <script>
-        document.getElementById('recognize-form').addEventListener('submit', async function(event) {
-            event.preventDefault();
+        const startWebcamButton = document.getElementById('start-webcam');
+        const recognizeButton = document.getElementById('recognize-button');
+        const resultDiv = document.getElementById('result-name');
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        let stream = null;
 
-            const form = event.target;
-            const formData = new FormData(form);
-            const resultDiv = document.getElementById('result-name');
-            const submitButton = form.querySelector('button');
+        startWebcamButton.addEventListener('click', async () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                recognizeButton.disabled = false;
+                startWebcamButton.textContent = 'Restart Webcam';
+                resultDiv.textContent = 'Webcam aktif. Siap untuk mengenali.';
+                resultDiv.className = '';
+            } catch (err) {
+                resultDiv.textContent = 'Gagal mengakses webcam.';
+                resultDiv.className = 'result-error';
+            }
+        });
 
-            submitButton.disabled = true;
-            submitButton.textContent = 'Mengenali...';
+        recognizeButton.addEventListener('click', async () => {
+            if (!stream) {
+                resultDiv.textContent = 'Mulai webcam terlebih dahulu.';
+                resultDiv.className = 'result-error';
+                return;
+            }
+
+            recognizeButton.disabled = true;
+
+            // Countdown
+            for (let i = 3; i > 0; i--) {
+                resultDiv.textContent = `Ambil gambar dalam ${i}...`;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
 
             resultDiv.textContent = 'Memproses...';
             resultDiv.className = '';
+
+            // Capture frame
+            const context = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageDataURL = canvas.toDataURL('image/jpeg');
+
+            const formData = new FormData();
+            formData.append('image', imageDataURL);
 
             try {
                 const response = await fetch('/api/recognize', {
@@ -135,15 +178,15 @@
                         resultDiv.classList.add('result-found');
                     }
                 } else {
-                    resultDiv.textContent = result.error || 'Terjadi kesalahan saat pengenalan.';
+                    resultDiv.textContent = result.error || 'Terjadi kesalahan.';
                     resultDiv.classList.add('result-error');
                 }
             } catch (error) {
                 resultDiv.textContent = 'Gagal terhubung ke server.';
                 resultDiv.classList.add('result-error');
             } finally {
-                submitButton.disabled = false;
-                submitButton.textContent = 'Kenali';
+                recognizeButton.disabled = false;
+                recognizeButton.textContent = 'Kenali Wajah';
             }
         });
     </script>

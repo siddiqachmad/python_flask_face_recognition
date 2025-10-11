@@ -4,6 +4,9 @@ import cv2
 import numpy as np
 from flask import Flask, request, jsonify, render_template
 from PIL import Image
+import base64
+import io
+import time
 
 app = Flask(__name__)
 
@@ -55,25 +58,46 @@ def training_status():
     except Exception as e:
         return jsonify({'error': f'Gagal memeriksa status training: {str(e)}'}), 500
 
+def _save_image_from_base64(base64_string, folder_path):
+    """Mendekode string base64 dan menyimpannya sebagai file gambar."""
+    try:
+        # Pisahkan header (e.g., "data:image/jpeg;base64,")
+        header, encoded = base64_string.split(",", 1)
+        image_data = base64.b64decode(encoded)
+
+        # Buat nama file unik berdasarkan timestamp
+        filename = f"face_{int(time.time() * 1000)}.jpg"
+        filepath = os.path.join(folder_path, filename)
+
+        with open(filepath, "wb") as f:
+            f.write(image_data)
+
+        return filepath
+    except Exception as e:
+        print(f"Error decoding base64 string: {e}")
+        return None
+
 @app.route('/api/add-face', methods=['POST'])
 def add_face():
-    """Menyimpan gambar wajah baru ke dataset untuk training."""
-    if 'file' not in request.files or 'name' not in request.form:
-        return jsonify({'error': 'Permintaan tidak lengkap'}), 400
+    """Menyimpan gambar wajah baru dari data base64 ke dataset."""
+    if 'image' not in request.form or 'name' not in request.form:
+        return jsonify({'error': 'Permintaan tidak lengkap (membutuhkan nama dan gambar).'}), 400
 
-    file = request.files['file']
     name = request.form.get('name', '').strip()
+    base64_image = request.form.get('image')
 
-    if file.filename == '' or name == '':
-        return jsonify({'error': 'File atau nama tidak boleh kosong'}), 400
+    if not name or not base64_image:
+        return jsonify({'error': 'Nama dan gambar tidak boleh kosong.'}), 400
 
     person_folder = os.path.join(DATASET_FOLDER, name)
     os.makedirs(person_folder, exist_ok=True)
 
-    filepath = os.path.join(person_folder, file.filename)
-    file.save(filepath)
+    filepath = _save_image_from_base64(base64_image, person_folder)
 
-    return jsonify({'success': f'Gambar untuk "{name}" berhasil ditambahkan.'})
+    if filepath:
+        return jsonify({'success': f'Gambar untuk "{name}" berhasil ditambahkan.'})
+    else:
+        return jsonify({'error': 'Gagal menyimpan gambar dari data base64.'}), 500
 
 @app.route('/api/train-model', methods=['POST'])
 def train_model():
@@ -130,56 +154,65 @@ def train_model():
     return jsonify({'success': f'Model berhasil dilatih dengan {len(faces)} wajah dari {len(label_map)} orang.'})
 
 
+def _image_from_base64(base64_string):
+    """Membaca gambar dari string base64 ke dalam format numpy array."""
+    try:
+        header, encoded = base64_string.split(",", 1)
+        image_data = base64.b64decode(encoded)
+
+        # Buka gambar dari byte stream
+        pil_image = Image.open(io.BytesIO(image_data)).convert('L') # Langsung grayscale
+        return np.array(pil_image, 'uint8')
+    except Exception as e:
+        print(f"Error decoding image from base64: {e}")
+        return None
+
 @app.route('/api/recognize', methods=['POST'])
 def recognize():
-    """Mengenali wajah dari gambar menggunakan model LBPH."""
+    """Mengenali wajah dari gambar base64 menggunakan model LBPH."""
     if not all(os.path.exists(f) for f in [LBPH_MODEL_FILE, LABELS_FILE]):
-        return jsonify({'error': 'Model belum dilatih. Silakan latih model terlebih dahulu.'}), 400
+        return jsonify({'error': 'Model belum dilatih. Latih model terlebih dahulu.'}), 400
+
+    if 'image' not in request.form:
+        return jsonify({'error': 'Permintaan tidak lengkap (membutuhkan gambar).'}), 400
+
+    base64_image = request.form.get('image')
+    if not base64_image:
+        return jsonify({'error': 'Data gambar tidak boleh kosong.'}), 400
 
     detector = cv2.CascadeClassifier(CASCADE_FILE)
     if detector.empty():
-        return jsonify({'error': 'Kesalahan Internal: Tidak dapat memuat file cascade classifier.'}), 500
+        return jsonify({'error': 'Kesalahan Internal: Tidak dapat memuat cascade classifier.'}), 500
 
     recognizer = cv2.face.LBPHFaceRecognizer_create()
     recognizer.read(LBPH_MODEL_FILE)
     with open(LABELS_FILE, 'rb') as f:
         id_to_name_map = pickle.load(f)
 
-    if 'file' not in request.files:
-        return jsonify({'error': 'File tidak ada'}), 400
-
-    file = request.files['file']
-    filepath = os.path.join(UPLOAD_FOLDER, file.filename)
-
     try:
-        file.save(filepath)
-        pil_image = Image.open(filepath).convert('L')
-        image_np = np.array(pil_image, 'uint8')
+        image_np = _image_from_base64(base64_image)
+        if image_np is None:
+            return jsonify({'error': 'Format gambar tidak valid.'}), 400
 
         detected_faces = detector.detectMultiScale(image_np)
         if len(detected_faces) == 0:
             return jsonify({'name': 'Unknown', 'message': 'Wajah tidak terdeteksi.'})
 
-        (x, y, w, h) = detected_faces[0]
+        # Ambil wajah terbesar jika ada lebih dari satu
+        (x, y, w, h) = sorted(detected_faces, key=lambda f: f[2]*f[3], reverse=True)[0]
         face = image_np[y:y+h, x:x+w]
 
-        # Prediksi menggunakan model LBPH
         label_id, confidence = recognizer.predict(face)
 
-        # Confidence 0 adalah kecocokan sempurna. Kita set threshold.
-        # Nilai di bawah 80-100 seringkali merupakan hasil yang baik.
         if confidence < 100:
             recognized_name = id_to_name_map.get(label_id, "Unknown")
         else:
             recognized_name = "Unknown"
 
-        return jsonify({'name': recognized_name, 'confidence': confidence})
+        return jsonify({'name': recognized_name, 'confidence': f"{confidence:.2f}"})
 
     except Exception as e:
-        return jsonify({'error': f'Terjadi kesalahan: {str(e)}'}), 500
-    finally:
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        return jsonify({'error': f'Terjadi kesalahan saat pengenalan: {str(e)}'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0')
