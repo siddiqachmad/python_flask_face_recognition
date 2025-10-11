@@ -35,11 +35,24 @@
             flex-direction: column;
             gap: 1rem;
         }
-        input[type="text"], input[type="file"] {
+        input[type="text"] {
             padding: 0.75rem;
             border: 1px solid #ddd;
             border-radius: 4px;
             font-size: 1rem;
+        }
+        video {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 100%;
+            height: auto;
+            background: #eee;
+        }
+        .webcam-controls {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 1rem;
         }
         button {
             padding: 0.75rem 1.5rem;
@@ -96,14 +109,17 @@
         <!-- Bagian 1: Tambah Wajah ke Dataset -->
         <div id="add-face-section">
             <h2>Langkah 1: Tambah Wajah</h2>
-            <form id="add-face-form">
+            <div id="webcam-container">
+                <video id="webcam" autoplay playsinline></video>
+                <canvas id="canvas" style="display:none;"></canvas>
+            </div>
+            <div class="webcam-controls">
+                <button id="start-webcam" class="btn-secondary">Mulai Webcam</button>
+            </div>
+            <form id="add-face-form" style="margin-top: 1rem;">
                 <label for="name">Nama:</label>
                 <input type="text" id="name" name="name" placeholder="Masukkan nama..." required>
-
-                <label for="file">Pilih Gambar:</label>
-                <input type="file" id="file" name="file" accept="image/jpeg, image/png" required>
-
-                <button type="submit" class="btn-primary">Tambah Wajah</button>
+                <button type="submit" id="capture-face" class="btn-primary" disabled>Ambil & Tambah Wajah</button>
             </form>
         </div>
 
@@ -126,13 +142,34 @@
         const messageDiv = document.getElementById('message');
         const trainButton = document.getElementById('train-model-button');
         const trainStatusText = document.querySelector('#train-model-section p');
+        const startWebcamButton = document.getElementById('start-webcam');
+        const captureButton = document.getElementById('capture-face');
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        const nameInput = document.getElementById('name');
+        let stream = null;
+
+        // Fungsi untuk memulai webcam
+        startWebcamButton.addEventListener('click', async () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                captureButton.disabled = false;
+                startWebcamButton.textContent = 'Restart Webcam';
+            } catch (err) {
+                showMessage('Tidak dapat mengakses webcam. Pastikan Anda memberikan izin.', 'error');
+                console.error("Error accessing webcam: ", err);
+            }
+        });
 
         // Fungsi untuk memeriksa status training dari backend
         async function checkTrainingStatus() {
             try {
                 const response = await fetch('/api/training-status');
                 const status = await response.json();
-
                 trainStatusText.textContent = status.message;
                 trainButton.disabled = !status.ready_to_train;
             } catch (error) {
@@ -141,14 +178,29 @@
             }
         }
 
-        // Handler untuk form "Tambah Wajah"
+        // Handler untuk form "Tambah Wajah" via webcam
         document.getElementById('add-face-form').addEventListener('submit', async function(event) {
             event.preventDefault();
-            const form = event.target;
-            const formData = new FormData(form);
-            const submitButton = form.querySelector('button');
 
-            setLoading(submitButton, 'Menambahkan...', true);
+            if (!stream || nameInput.value.trim() === '') {
+                showMessage('Nama harus diisi dan webcam harus aktif.', 'error');
+                return;
+            }
+
+            // Ambil gambar dari video
+            const context = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Konversi ke data URL (base64)
+            const imageDataURL = canvas.toDataURL('image/jpeg');
+
+            const formData = new FormData();
+            formData.append('name', nameInput.value.trim());
+            formData.append('image', imageDataURL);
+
+            setLoading(captureButton, 'Menambahkan...', true);
             showMessage('', 'none');
 
             try {
@@ -159,8 +211,7 @@
                 const result = await response.json();
                 if (response.ok) {
                     showMessage(result.success, 'success');
-                    form.reset();
-                    // Periksa kembali status setelah berhasil menambahkan wajah
+                    // Tidak me-reset nama agar mudah menambah beberapa gambar
                     await checkTrainingStatus();
                 } else {
                     showMessage(result.error, 'error');
@@ -168,7 +219,7 @@
             } catch (error) {
                 showMessage('Gagal terhubung ke server.', 'error');
             } finally {
-                setLoading(submitButton, 'Tambah Wajah', false);
+                setLoading(captureButton, 'Ambil & Tambah Wajah', false);
             }
         });
 
